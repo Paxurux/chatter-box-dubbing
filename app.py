@@ -605,7 +605,7 @@ Return ONLY the translated JSON with the same structure:"""
                 lines = translated_json_clean.split('\n')
                 # Skip first line (```json or ```) and last line (```)
                 start_idx = 1
-                end_idx = -1
+                end_idx = len(lines)
                 # If first line after ``` contains 'json', skip it too
                 if len(lines) > 1 and 'json' in lines[1].lower():
                     start_idx = 2
@@ -615,6 +615,24 @@ Return ONLY the translated JSON with the same structure:"""
                         end_idx = i
                         break
                 translated_json_clean = '\n'.join(lines[start_idx:end_idx])
+            
+            # Additional cleaning for common JSON issues
+            translated_json_clean = translated_json_clean.strip()
+            
+            # Fix common JSON issues
+            if not translated_json_clean.endswith('}'):
+                # Try to find the last complete segment
+                last_brace = translated_json_clean.rfind('}')
+                if last_brace > 0:
+                    # Find the segments array closing
+                    segments_end = translated_json_clean.rfind(']}')
+                    if segments_end > last_brace:
+                        translated_json_clean = translated_json_clean[:segments_end+2] + '}'
+                    else:
+                        translated_json_clean = translated_json_clean[:last_brace+1] + ']}'
+            
+            print(f"🔍 Cleaned JSON (first 200 chars): {translated_json_clean[:200]}...")
+            print(f"🔍 Cleaned JSON (last 200 chars): ...{translated_json_clean[-200:]}")
             
             # Parse the translated JSON
             translated_data = json.loads(translated_json_clean)
@@ -639,19 +657,53 @@ Return ONLY the translated JSON with the same structure:"""
             
             # Try to extract translations manually if JSON parsing fails
             try:
-                # Simple fallback - look for translated text patterns
+                print("🔧 Attempting manual translation extraction...")
+                
+                # Try to fix the JSON by finding the incomplete part
+                import re
+                
+                # Look for segments in the response
+                segments_match = re.search(r'"segments":\s*\[(.*)', translated_json, re.DOTALL)
+                if segments_match:
+                    segments_text = segments_match.group(1)
+                    
+                    # Find all complete segment objects
+                    segment_pattern = r'\{"id":\s*(\d+),\s*"text":\s*"([^"]*)",\s*"start":\s*([\d.]+),\s*"end":\s*([\d.]+),\s*"duration":\s*([\d.]+)\}'
+                    matches = re.findall(segment_pattern, segments_text)
+                    
+                    if matches:
+                        result = []
+                        for match in matches:
+                            seg_id, text, start, end, duration = match
+                            result.append({
+                                "text": text,  # This is the translated text!
+                                "start": float(start),
+                                "end": float(end),
+                                "duration": float(duration),
+                                "segment_id": int(seg_id)
+                            })
+                        
+                        print(f"✅ Manually extracted {len(result)} translated segments")
+                        for i, seg in enumerate(result[:3]):  # Show first 3
+                            print(f"   Segment {i+1}: '{seg['text'][:50]}...'")
+                        
+                        return result
+                
+                # If manual extraction fails, return original segments (fallback)
+                print("⚠️ Manual extraction failed, using original segments")
                 result = []
                 for i, seg in enumerate(chunk):
-                    # Keep original if we can't parse
                     result.append({
-                        "text": seg['text'],  # Keep original for now
+                        "text": seg['text'],  # Original text as last resort
                         "start": seg['start'],
                         "end": seg['end'],
                         "duration": seg['duration'],
                         "segment_id": seg['segment_id']
                     })
                 return result
-            except:
+                
+            except Exception as fallback_error:
+                print(f"❌ Fallback extraction failed: {fallback_error}")
                 return chunk
         
     def _translate_text_batch(self, prompt: str, target_language: str) -> str:
@@ -762,10 +814,10 @@ class AudioProcessor:
             return None
     
     def adjust_audio_speed(self, audio_path: str, target_duration: float) -> str:
-        """Adjust audio speed to match target duration"""
+        """Adjust audio speed to match target duration with high quality processing"""
         try:
-            # Load audio
-            audio, sr = librosa.load(audio_path)
+            # Load audio at high quality
+            audio, sr = librosa.load(audio_path, sr=None)  # Keep original sample rate
             current_duration = len(audio) / sr
             
             print(f"🔧 Adjusting audio: {current_duration:.2f}s → {target_duration:.2f}s")
@@ -775,6 +827,9 @@ class AudioProcessor:
                 print("⏭️ Duration close enough, skipping adjustment")
                 return audio_path
             
+            # Remove silence from beginning and end
+            audio_trimmed, _ = librosa.effects.trim(audio, top_db=20)
+            
             # Calculate speed ratio
             speed_ratio = current_duration / target_duration
             
@@ -783,12 +838,26 @@ class AudioProcessor:
             
             print(f"⚡ Speed ratio: {speed_ratio:.2f}x")
             
-            # Adjust speed using librosa
-            adjusted_audio = librosa.effects.time_stretch(audio, rate=speed_ratio)
+            # High-quality speed adjustment using phase vocoder
+            if speed_ratio != 1.0:
+                adjusted_audio = librosa.effects.time_stretch(audio_trimmed, rate=speed_ratio)
+            else:
+                adjusted_audio = audio_trimmed
             
-            # Save adjusted audio
+            # Normalize audio to prevent clipping
+            adjusted_audio = librosa.util.normalize(adjusted_audio)
+            
+            # Apply gentle fade in/out to prevent clicks
+            fade_samples = int(0.01 * sr)  # 10ms fade
+            if len(adjusted_audio) > 2 * fade_samples:
+                # Fade in
+                adjusted_audio[:fade_samples] *= np.linspace(0, 1, fade_samples)
+                # Fade out
+                adjusted_audio[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+            
+            # Save adjusted audio at high quality
             output_path = audio_path.replace('.wav', '_adjusted.wav')
-            sf.write(output_path, adjusted_audio, sr)
+            sf.write(output_path, adjusted_audio, sr, subtype='PCM_24')  # 24-bit quality
             
             # Verify the adjustment
             final_duration = len(adjusted_audio) / sr
@@ -981,6 +1050,15 @@ def complete_video_dubbing_workflow_with_realtime_updates(video_file, target_lan
             progress_callback=translation_progress_callback
         )
         
+        # Debug: Check what translations were actually stored
+        print("🔍 Debug: Translation results:")
+        for lang, lang_segments in translations.items():
+            print(f"   Language {lang}: {len(lang_segments)} segments")
+            if lang_segments:
+                print(f"   First segment: '{lang_segments[0]['text'][:100]}...'")
+                print(f"   Last segment: '{lang_segments[-1]['text'][:100]}...'")
+        print("🔍 End translation debug")
+        
         # Create translation results HTML
         translation_html = "<div style='font-family: monospace;'>"
         for language in target_languages:
@@ -1033,6 +1111,10 @@ def complete_video_dubbing_workflow_with_realtime_updates(video_file, target_lan
                     progress_states["tts_status"] = f"🗣️ Generating TTS segment {seg_idx + 1}/{len(translations[language])} for {lang_name}"
                     progress_states["audio_processing"] = f"🔧 Processing segment {seg_idx + 1}: {segment['text'][:50]}..."
                     
+                    print(f"🔍 Debug TTS Input - Language: {language}")
+                    print(f"🔍 Debug TTS Input - Text: '{segment['text'][:100]}...'")
+                    print(f"🔍 Debug TTS Input - Duration: {segment['duration']}")
+                    
                     tts_audio = generate_tts_for_segment_enhanced(
                         segment['text'], 
                         language, 
@@ -1078,7 +1160,9 @@ def complete_video_dubbing_workflow_with_realtime_updates(video_file, target_lan
                 progress_states["video_assembly"] = f"🎬 Assembling final video for {lang_name}..."
                 
                 # Combine with original video
-                output_video_path = f"dubbed_{language}_{os.path.basename(video_file)}"
+                cache_dir = os.path.join("cache", "dubbed_videos")
+                os.makedirs(cache_dir, exist_ok=True)
+                output_video_path = os.path.join(cache_dir, f"dubbed_{language}_{os.path.basename(video_file)}")
                 final_video = combine_video_with_audio(
                     video_file, final_audio, output_video_path
                 )

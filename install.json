@@ -4,7 +4,7 @@
       "method": "shell.run",
       "params": {
         "message": [
-          "git clone https://github.com/SUP3RMASS1VE/chatterbox-SUP3R app"
+          "git clone https://github.com/Paxurux/chatter-box-dubbing.git app"
         ]
       }
     },
