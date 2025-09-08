@@ -1,0 +1,126 @@
+# Models and cache directories
+models/
+cache/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.nemo
+
+# Virtual environments
+venv/
+env/
+.env
+.venv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Audio/Video files (examples)
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Gradio temp files
+gradio_cached_examples/
+flagged/
+
+# HuggingFace cache
+.cache/
+transformers_cache/
+
+# Large data files
+*.zip
+*.tar.gz
+*.7z
+
+# API keys and secrets
+.env
+config.json
+secrets.json
+api_keys.txt
+
+# Logs
+*.log
+logs/
+
+# Test outputs
+test_output/
+output/
+results/
+
+# Pinokio specific files (not needed for GitHub)
+pinokio*.json
+pinokio*.js
+install.json
+start.json
+*.js
+ENVIRONMENT
+link.js
+reset.js
+torch.js
+update.js
+icon.png
+
+# Original app directory (files moved to root)
+app/

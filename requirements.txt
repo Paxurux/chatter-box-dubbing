@@ -1,0 +1,34 @@
+# Core dependencies for ChatterBox AI Video Dubbing System
+
+# Web interface
+gradio>=5.44.0
+
+# Core ML and audio processing
+numpy>=1.24.0
+librosa>=0.11.0
+soundfile>=0.12.1
+scipy>=1.10.0
+resampy>=0.4.3
+
+# TTS and tokenization
+s3tokenizer
+safetensors>=0.5.3
+transformers>=4.46.0
+diffusers>=0.29.0
+omegaconf>=2.3.0
+resemble-perth>=1.0.1
+silero-vad>=5.1.0
+conformer>=0.3.2
+pykakasi>=2.3.0
+
+# Video dubbing specific
+google-generativeai>=0.3.0
+nemo_toolkit[asr]>=1.20.0
+pandas>=2.0.0
+
+# Indic language support
+https://github.com/SUP3RMASS1VE/indic_numtowords-1.0.1/releases/download/1.0.1/indic_numtowords-1.0.1-py3-none-any.whl
+
+# Optional performance improvements
+# cuda-python>=12.3  # Uncomment for CUDA graph optimization
+# huggingface_hub[hf_xet]  # Uncomment for faster model downloads
