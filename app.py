@@ -386,67 +386,54 @@ class ParakeetTranscriber:
             
             print(f"🔍 Debug: Transcription output type: {type(output)}")
             print(f"🔍 Debug: Output length: {len(output) if output else 'None'}")
-            
-            # Handle tuple format: (transcriptions, timestamps) or (hypotheses, ...)
-            if isinstance(output, tuple) and len(output) >= 2:
-                transcriptions = output[0]  # List of transcription results
-                print(f"🔍 Debug: Transcriptions type: {type(transcriptions)}")
-                print(f"🔍 Debug: Transcriptions length: {len(transcriptions) if transcriptions else 'None'}")
-                
-                if transcriptions and len(transcriptions) > 0:
-                    first_result = transcriptions[0]
-                    print(f"🔍 Debug: First result type: {type(first_result)}")
-                    print(f"🔍 Debug: First result attributes: {[attr for attr in dir(first_result) if not attr.startswith('_')]}")
-                    
-                    # Check if it has timestep or timestamp attribute
-                    if hasattr(first_result, 'timestep'):
-                        print(f"🔍 Debug: Found timestep attribute")
-                        timestep_data = first_result.timestep
-                        print(f"🔍 Debug: Timestep type: {type(timestep_data)}")
-                        print(f"🔍 Debug: Timestep keys: {timestep_data.keys() if hasattr(timestep_data, 'keys') else 'No keys'}")
-                        
-                        # Process segment-level timestamps
-                        if 'segment' in timestep_data:
-                            segment_timestamps = timestep_data['segment']
-                            print(f"🔍 Debug: Found {len(segment_timestamps)} segment timestamps")
-                            
-                            for i, stamp in enumerate(segment_timestamps):
-                                segment_text = stamp['segment']
-                                start_time = stamp['start'] + time_offset
-                                end_time = stamp['end'] + time_offset
-                                
-                                print(f"🔍 Debug: Segment {i}: '{segment_text}' ({start_time:.2f}s - {end_time:.2f}s)")
-                                
-                                # For music, add buffer and minimum duration
-                                if is_music:
-                                    end_time += 0.3
-                                    min_duration = 0.5
-                                    if end_time - start_time < min_duration:
-                                        end_time = start_time + min_duration
-                                
-                                segments.append({
-                                    "text": segment_text,
-                                    "start": start_time,
-                                    "end": end_time,
-                                    "duration": end_time - start_time
-                                })
-                        else:
-                            print("🔍 Debug: No 'segment' key in timestep")
-                    elif hasattr(first_result, 'text'):
-                        # Fallback: just use the text without timestamps
-                        print(f"🔍 Debug: Using text without timestamps: '{first_result.text}'")
-                        segments.append({
-                            "text": first_result.text,
-                            "start": 0.0 + time_offset,
-                            "end": 10.0 + time_offset,  # Default 10 second duration
-                            "duration": 10.0
-                        })
-                    else:
-                        print("🔍 Debug: No timestep or text attribute found")
-                else:
-                    print("🔍 Debug: Empty transcriptions list")
+
+            transcriptions = None
+            # FIX: Add a check for the 'list' type returned by the model
+            if isinstance(output, list) and len(output) > 0:
+                transcriptions = output
+            # Keep the original check for tuple as a fallback
+            elif isinstance(output, tuple) and len(output) >= 2:
+                transcriptions = output[0]
             else:
-                print("🔍 Debug: Output is not a tuple or has wrong length")
+                print("🔍 Debug: Output is not in a recognized list or tuple format.")
+
+            # Process the transcriptions if they were successfully extracted
+            if transcriptions:
+                first_result = transcriptions[0]
+                print(f"🔍 Debug: First result type: {type(first_result)}")
+                
+                if hasattr(first_result, 'timestep'):
+                    timestep_data = first_result.timestep
+                    
+                    if 'segment' in timestep_data:
+                        segment_timestamps = timestep_data['segment']
+                        print(f"🔍 Debug: Found {len(segment_timestamps)} segment timestamps")
+                        
+                        for i, stamp in enumerate(segment_timestamps):
+                            segment_text = stamp['segment']
+                            start_time = stamp['start'] + time_offset
+                            end_time = stamp['end'] + time_offset
+                            
+                            if is_music:
+                                end_time += 0.3
+                                min_duration = 0.5
+                                if end_time - start_time < min_duration:
+                                    end_time = start_time + min_duration
+
+                            segments.append({
+                                "text": segment_text,
+                                "start": start_time,
+                                "end": end_time,
+                                "duration": end_time - start_time
+                            })
+                elif hasattr(first_result, 'text'):
+                    print(f"🔍 Debug: Using text without timestamps: '{first_result.text}'")
+                    segments.append({
+                        "text": first_result.text,
+                        "start": 0.0 + time_offset,
+                        "end": 10.0 + time_offset,
+                        "duration": 10.0
+                    })
             
             print(f"🔍 Debug: Returning {len(segments)} segments")
             return segments
@@ -597,49 +584,21 @@ Return ONLY the translated JSON with the same structure:"""
         translated_json = self._translate_text_batch(prompt, target_language)
         
         try:
-            # Clean the response to extract JSON
-            translated_json_clean = translated_json.strip()
+            # FIX: Use a more robust regex to find the JSON object in the response
+            import re
+            json_match = re.search(r'\{.*\}', translated_json, re.DOTALL)
             
-            # Remove markdown code blocks if present
-            if translated_json_clean.startswith('```'):
-                lines = translated_json_clean.split('\n')
-                # Skip first line (```json or ```) and last line (```)
-                start_idx = 1
-                end_idx = len(lines)
-                # If first line after ``` contains 'json', skip it too
-                if len(lines) > 1 and 'json' in lines[1].lower():
-                    start_idx = 2
-                # Find the closing ``` and exclude it
-                for i in range(len(lines)-1, -1, -1):
-                    if lines[i].strip() == '```':
-                        end_idx = i
-                        break
-                translated_json_clean = '\n'.join(lines[start_idx:end_idx])
+            if not json_match:
+                # If no JSON is found at all, raise an error
+                raise ValueError("No valid JSON object found in the Gemini API response.")
             
-            # Additional cleaning for common JSON issues
-            translated_json_clean = translated_json_clean.strip()
+            json_string = json_match.group(0)
             
-            # Fix common JSON issues
-            if not translated_json_clean.endswith('}'):
-                # Try to find the last complete segment
-                last_brace = translated_json_clean.rfind('}')
-                if last_brace > 0:
-                    # Find the segments array closing
-                    segments_end = translated_json_clean.rfind(']}')
-                    if segments_end > last_brace:
-                        translated_json_clean = translated_json_clean[:segments_end+2] + '}'
-                    else:
-                        translated_json_clean = translated_json_clean[:last_brace+1] + ']}'
+            # Now, try to parse the extracted JSON string
+            translated_data = json.loads(json_string)
             
-            print(f"🔍 Cleaned JSON (first 200 chars): {translated_json_clean[:200]}...")
-            print(f"🔍 Cleaned JSON (last 200 chars): ...{translated_json_clean[-200:]}")
-            
-            # Parse the translated JSON
-            translated_data = json.loads(translated_json_clean)
-            
-            # Convert back to segment format
             result = []
-            for seg_data in translated_data['segments']:
+            for seg_data in translated_data.get('segments', []):
                 result.append({
                     "text": seg_data['text'],
                     "start": seg_data['start'],
@@ -648,63 +607,19 @@ Return ONLY the translated JSON with the same structure:"""
                     "segment_id": seg_data['id']
                 })
             
-            print(f"✅ Successfully translated {len(result)} segments")
+            if not result:
+                raise ValueError("JSON was parsed, but no segments were found.")
+
+            print(f"✅ Successfully translated and parsed {len(result)} segments")
             return result
             
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON parsing error: {e}")
-            print(f"Raw response: {translated_json[:500]}...")
-            
-            # Try to extract translations manually if JSON parsing fails
-            try:
-                print("🔧 Attempting manual translation extraction...")
-                
-                # Try to fix the JSON by finding the incomplete part
-                import re
-                
-                # Look for segments in the response
-                segments_match = re.search(r'"segments":\s*\[(.*)', translated_json, re.DOTALL)
-                if segments_match:
-                    segments_text = segments_match.group(1)
-                    
-                    # Find all complete segment objects
-                    segment_pattern = r'\{"id":\s*(\d+),\s*"text":\s*"([^"]*)",\s*"start":\s*([\d.]+),\s*"end":\s*([\d.]+),\s*"duration":\s*([\d.]+)\}'
-                    matches = re.findall(segment_pattern, segments_text)
-                    
-                    if matches:
-                        result = []
-                        for match in matches:
-                            seg_id, text, start, end, duration = match
-                            result.append({
-                                "text": text,  # This is the translated text!
-                                "start": float(start),
-                                "end": float(end),
-                                "duration": float(duration),
-                                "segment_id": int(seg_id)
-                            })
-                        
-                        print(f"✅ Manually extracted {len(result)} translated segments")
-                        for i, seg in enumerate(result[:3]):  # Show first 3
-                            print(f"   Segment {i+1}: '{seg['text'][:50]}...'")
-                        
-                        return result
-                
-                # If manual extraction fails, return original segments (fallback)
-                print("⚠️ Manual extraction failed, using original segments")
-                result = []
-                for i, seg in enumerate(chunk):
-                    result.append({
-                        "text": seg['text'],  # Original text as last resort
-                        "start": seg['start'],
-                        "end": seg['end'],
-                        "duration": seg['duration'],
-                        "segment_id": seg['segment_id']
-                    })
-                return result
-                
-            except Exception as fallback_error:
-                print(f"❌ Fallback extraction failed: {fallback_error}")
-                return chunk
+        except (json.JSONDecodeError, ValueError) as e:
+            # If any part of the process fails, raise an exception to stop the dubbing.
+            error_message = f"❌ CRITICAL: Failed to parse translation from Gemini. Error: {e}"
+            print(error_message)
+            print(f"   Raw response from API was: {translated_json[:500]}...")
+            # This will stop the process and display the error in the UI
+            raise Exception(error_message)
         
     def _translate_text_batch(self, prompt: str, target_language: str) -> str:
         """Translate batch of segments using NEW Gemini API"""
